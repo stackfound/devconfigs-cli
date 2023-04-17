@@ -1,0 +1,220 @@
+#!/bin/bash
+
+DEVCONFIGS_COMMAND=$1
+WORKSPACE_FOLDER=$PWD
+DEVCONTAINER_FOLDER=$WORKSPACE_FOLDER/.devcontainer
+DEVCONTAINER_JSON=$DEVCONTAINER_FOLDER/devcontainer.json
+DEVCONFIGS_FOLDER=$DEVCONTAINER_FOLDER/devconfigs
+DEVCONFIGS_YML=$DEVCONTAINER_FOLDER/devconfigs.yml
+VSCODE_FOLDER=$WORKSPACE_FOLDER/.vscode
+TASKS_FILE=$VSCODE_FOLDER/tasks.json
+LAUNCH_FILE=$VSCODE_FOLDER/launch.json
+
+# color definitions
+NONE='\033[00m'
+RED='\033[01;31m'
+GREEN='\033[01;32m'
+YELLOW='\033[01;33m'
+PURPLE='\033[01;35m'
+CYAN='\033[01;36m'
+WHITE='\033[01;37m'
+BOLD='\033[1m'
+UNDERLINE='\033[4m'
+
+#symbol definitions
+CHECK="${GREEN}✔${NONE}"
+CROSS="${RED}✘${NONE}"
+ARROW="${YELLOW}➔${NONE}"
+
+checkDevconfigsDependencies() {
+    hash jq > /dev/null 2>&1
+    if [ $? != 0 ]; then
+        while true; do
+            read -p "The devconfigs CLI requires jq to be installed on your system. Do you wish to install this program? " yn
+            echo
+            case $yn in
+                [Yy]* ) brew install jq; echo; break;;
+                [Nn]* ) exit;;
+                * ) echo "Please answer yes or no.";;
+            esac
+        done
+    fi
+
+    hash yq > /dev/null 2>&1
+    if [ $? != 0 ]; then
+        while true; do
+            read -p "The devconfigs CLI requires yq to be installed on your system. Do you wish to install this program? " yn
+            echo
+            case $yn in
+                [Yy]* ) brew install yq; echo; break;;
+                [Nn]* ) exit;;
+                * ) echo "Please answer yes or no.";;
+            esac
+        done
+    fi
+}
+
+configureDependencies() {
+    printf "\n"
+    echo "Checking to see if your host is ready to run the devcontainer..."
+    echo
+
+    # setup dependencies
+    echo "Running dependency checks..."
+    repositories=($(yq e '.dependencies | to_entries | .[] | .key' $DEVCONFIGS_YML))
+    for repository in "${repositories[@]}"; do
+        echo $repository
+        dependencies=($(yq e '.dependencies.'$repository' | to_entries | .[] | .key' $DEVCONFIGS_YML))
+        for dependency in "${dependencies[@]}"; do
+            DEPENDENCY_DIRECTORY=$DEVCONFIGS_FOLDER/$name/dependencies/$dependency
+            DESCRIPTION=$(yq .description $DEPENDENCY_DIRECTORY/info.yml)
+            source $DEPENDENCY_DIRECTORY/check.sh
+            if [ $? != 0 ]
+            then
+                tput sc
+                printf "$CROSS $DESCRIPTION\n"
+                echo
+                # try to install the dependency
+                eval $DEPENDENCY_DIRECTORY/install.sh
+                if [[ $? == 0 ]]
+                then
+                    tput rc
+                    tput ed || tput cd
+                    echo -e "$CHECK $DESCRIPTION"
+                else echo && DEPS_MISSING=true
+                fi
+            else
+                printf "$CHECK $DESCRIPTION\n"
+            fi
+        done
+    done
+    echo
+
+    if [[ $DEPS_MISSING == 'true' ]] ;
+    then
+    echo -e "${CROSS} ${RED}Please address the issues above to run the devcontainer.$NONE"
+    exit 1
+    else
+    echo -e "${CHECK} This host machine is ready to run the devcontainer!"
+    return 0
+    fi
+}
+
+configureTasks() {
+    echo "Configuring tasks..."
+
+    BUILDTASK_LABEL="[INI] devconfigs tasks"
+
+    touch $TASKS_FILE
+    echo '{ "version": "2.0.0", "tasks": [] }' | jq '.' > $TASKS_FILE
+    buildTask=$( echo '{ "label": "'$BUILDTASK_LABEL'", "dependsOn": [], "dependsOrder": "sequence", "problemMatcher": [], "runOptions": { "runOn": "default" }, "group": { "kind": "build", "isDefault": true } }' | jq '.' )
+    jq ".tasks |= .+ [$buildTask]" $TASKS_FILE > tmp.json && mv tmp.json $TASKS_FILE
+
+    repositories=($(yq e '.tasks | to_entries | .[] | .key' $DEVCONFIGS_YML))
+    for repository in "${repositories[@]}"; do
+        echo $repository
+        tasks=($(yq e '.tasks.'$repository' | to_entries | .[] | .key' $DEVCONFIGS_YML))
+        for task in "${tasks[@]}"; do
+            TASK_DIRECTORY=$DEVCONFIGS_FOLDER/$name/tasks/$task
+            if test -f "$TASK_DIRECTORY/buildConfig.sh"
+            then
+                # build json task using config options
+                source $TASK_DIRECTORY/buildConfig.sh
+            fi
+            # add json task to tasks file
+            task_data=$(jq '.' $TASK_DIRECTORY/config.json)
+            jq ".tasks |= .+ [$task_data]" $TASKS_FILE > tmp.json && mv tmp.json $TASKS_FILE
+            # add json task label to buildTask
+            label=$( echo $task_data | jq -r '.label' )
+            NEWVAL=$(jq --arg val "$label" --arg buildtask_label "$BUILDTASK_LABEL" '.tasks[] | select(.label == $buildtask_label) | .dependsOn += [$val]' $TASKS_FILE)
+            jq -r --arg val "$NEWVAL" --arg buildtask_label "$BUILDTASK_LABEL" '(.tasks[] | select(.label == $buildtask_label)) |= ($val | fromjson)' $TASKS_FILE > $VSCODE_FOLDER/tmp.json && mv $VSCODE_FOLDER/tmp.json $TASKS_FILE
+            printf "$CHECK $task\n"
+        done
+    done
+}
+
+configureLaunchers() {
+    echo "Configuring debug launchers..."
+    repositories=($(yq e '.launchers | to_entries | .[] | .key' $DEVCONFIGS_YML))
+    touch $LAUNCH_FILE
+    echo '{ "version": "2.0.0", "configurations": [] }' | jq '.' > $LAUNCH_FILE
+    for repository in "${repositories[@]}"; do
+        echo $repository
+        launchers=($(yq e '.launchers.'$repository' | to_entries | .[] | .key' $DEVCONFIGS_YML))
+        for launcher in "${launchers[@]}"; do
+            LAUNCH_DIRECTORY=$DEVCONFIGS_FOLDER/$name/launchers/$launcher
+            # add json configuration to launch file
+            launcher_data=$(jq '.' $LAUNCH_DIRECTORY/config.json)
+            jq ".configurations |= .+ [$launcher_data]" $LAUNCH_FILE > tmp.json && mv tmp.json $LAUNCH_FILE
+            printf "$CHECK $launcher\n"
+        done
+    done
+}
+
+init() {
+    INITIALIZE_COMMAND="devconfigs setup"
+    jq '.initializeCommand = "devconfigs setup"' $DEVCONTAINER_JSON > tmp.json && mv tmp.json $DEVCONTAINER_JSON
+    POST_START_COMMAND='echo && echo "👍 \\033[1mPress \\033[01;35mCMD+SHIFT+B \\033[01;37mto finish setting up the devcontainer...\\033[00m" && echo'
+    jq -r --arg postStartCommand "$POST_START_COMMAND" '.postStartCommand = $postStartCommand' $DEVCONTAINER_JSON > tmp.json && mv tmp.json $DEVCONTAINER_JSON
+
+    echo ".vscode" >> .gitignore
+    echo ".devcontainer/devconfigs" >> .gitignore
+
+    if [ ! -f "$DEVCONFIGS_YML" ]; then
+        s1='(.repositories.stackfound = "https://github.com/stackfound/devconfigs.git")' && \
+        s2='(.dependencies = "") | .dependencies tag="!!null"' && \
+        s3='(.launchers.stackfound.flask = "") | .launchers.stackfound.flask tag="!!null"' && \
+        s4='(.tasks.stackfound.dotbot.repo = "https://github.com/stackfound/dotfiles.git")' && \
+        s5='(.tasks.stackfound.flask.directory = "flask") | (.tasks.stackfound.flask.port = 5051)' && \
+        s6='(.tasks.stackfound.fish = "") | .tasks.stackfound.fish tag="!!null"' && \
+        yq --null-input "$s1 | $s2 | $s3 | $s4 | $s5 | $s6" > $DEVCONFIGS_YML
+    fi
+}
+
+setup() {
+    rm -rf $DEVCONFIGS_FOLDER
+    # pull repos locally
+    echo "Cloning devconfigs..."
+    repositories=$(yq e -o=j -I=0 '.repositories | keys' $DEVCONFIGS_YML)
+    for repository in "${repositories[@]}"; do
+        name=$(echo $repository | yq .[0])
+        url=$(yq .repositories.$name $DEVCONFIGS_YML)
+        git clone --quiet $url $DEVCONFIGS_FOLDER/$name
+        printf "$CHECK $name\n"
+    done
+
+    # check dependencies
+    configureDependencies
+    if [[ $? == 1 ]]
+    then
+        exit 0
+    fi
+    echo
+
+    rm -rf $VSCODE_FOLDER
+    mkdir $VSCODE_FOLDER
+
+    configureTasks
+    echo
+
+    configureLaunchers
+}
+
+echo
+case $DEVCONFIGS_COMMAND in
+    setup )
+        checkDevconfigsDependencies
+        setup
+        exit 0
+    ;;
+    init )
+        init
+        exit 0
+    ;;
+    * )
+        echo 'Did you mean "devconfigs init"?'
+        echo 'Run "devconfigs init" to initialize your repository for devconfigs.'
+        echo
+        exit 1
+    ;;
+esac
