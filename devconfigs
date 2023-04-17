@@ -157,6 +157,7 @@ init() {
     POST_START_COMMAND='echo && echo "👍 \\033[1mPress \\033[01;35mCMD+SHIFT+B \\033[01;37mto finish setting up the devcontainer...\\033[00m" && echo'
     jq -r --arg postStartCommand "$POST_START_COMMAND" '.postStartCommand = $postStartCommand' $DEVCONTAINER_JSON > tmp.json && mv tmp.json $DEVCONTAINER_JSON
 
+    echo >> .gitignore
     echo ".vscode" >> .gitignore
     echo ".devcontainer/devconfigs" >> .gitignore
 
