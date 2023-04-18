@@ -143,6 +143,11 @@ configureLaunchers() {
         launchers=($(yq e '.launchers.'$repository' | to_entries | .[] | .key' $DEVCONFIGS_YML))
         for launcher in "${launchers[@]}"; do
             LAUNCH_DIRECTORY=$DEVCONFIGS_FOLDER/$name/launchers/$launcher
+            if test -f "$LAUNCH_DIRECTORY/buildConfig.sh"
+            then
+                # build json task using config options
+                source $LAUNCH_DIRECTORY/buildConfig.sh
+            fi
             # add json configuration to launch file
             launcher_data=$(jq '.' $LAUNCH_DIRECTORY/config.json)
             jq ".configurations |= .+ [$launcher_data]" $LAUNCH_FILE > tmp.json && mv tmp.json $LAUNCH_FILE
