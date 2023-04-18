@@ -206,6 +206,23 @@ setup() {
     configureLaunchers
 }
 
+create() {
+    if [ -d .git ]; then
+        printf "${CROSS} The devconfigs create command cannot run inside an existing git repository.\n"
+        echo "  Please try again inside a directory that is not a git repository."
+    else
+        git clone --quiet https://github.com/stackfound/devconfigs-create.git .
+        git remote remove origin
+        l1="${CHECK} You're all set! Next steps are to edit your dependency check, debug"
+        l2="  launcher, and task configurations."
+        l3="  When you're done, add your remote repo URL using the"
+        l4="  git remote add origin <REPO_URL>"
+        l5="  command, then push your changes. Finally, specify the repo URL in your"
+        l6="  devconfigs.yaml file to use these devconfigs."
+        printf "$l1\n$l2\n\n$l3\n\n$l4\n\n$l5\n$l6"
+    fi
+}
+
 echo
 case $DEVCONFIGS_COMMAND in
     setup )
@@ -215,6 +232,10 @@ case $DEVCONFIGS_COMMAND in
     ;;
     init )
         init
+        exit 0
+    ;;
+    create )
+        create
         exit 0
     ;;
     * )
