@@ -66,7 +66,7 @@ configureDependencies() {
         echo $repository
         dependencies=($(yq e '.dependencies.'$repository' | to_entries | .[] | .key' $DEVCONFIGS_YML))
         for dependency in "${dependencies[@]}"; do
-            DEPENDENCY_DIRECTORY=$DEVCONFIGS_FOLDER/$name/dependencies/$dependency
+            DEPENDENCY_DIRECTORY=$DEVCONFIGS_FOLDER/$repository/dependencies/$dependency
             DESCRIPTION=$(yq .description $DEPENDENCY_DIRECTORY/info.yml)
             source $DEPENDENCY_DIRECTORY/check.sh
             if [ $? != 0 ]
@@ -75,7 +75,7 @@ configureDependencies() {
                 printf "$CROSS $DESCRIPTION\n"
                 echo
                 # try to install the dependency
-                eval $DEPENDENCY_DIRECTORY/install.sh
+                source $DEPENDENCY_DIRECTORY/install.sh
                 if [[ $? == 0 ]]
                 then
                     tput rc
@@ -115,7 +115,7 @@ configureTasks() {
         echo $repository
         tasks=($(yq e '.tasks.'$repository' | to_entries | .[] | .key' $DEVCONFIGS_YML))
         for task in "${tasks[@]}"; do
-            TASK_DIRECTORY=$DEVCONFIGS_FOLDER/$name/tasks/$task
+            TASK_DIRECTORY=$DEVCONFIGS_FOLDER/$repository/tasks/$task
             if test -f "$TASK_DIRECTORY/buildConfig.sh"
             then
                 # build json task using config options
@@ -142,14 +142,14 @@ configureLaunchers() {
         echo $repository
         launchers=($(yq e '.launchers.'$repository' | to_entries | .[] | .key' $DEVCONFIGS_YML))
         for launcher in "${launchers[@]}"; do
-            LAUNCH_DIRECTORY=$DEVCONFIGS_FOLDER/$name/launchers/$launcher
-            if test -f "$LAUNCH_DIRECTORY/buildConfig.sh"
+            LAUNCHER_DIRECTORY=$DEVCONFIGS_FOLDER/$repository/launchers/$launcher
+            if test -f "$LAUNCHER_DIRECTORY/buildConfig.sh"
             then
                 # build json task using config options
-                source $LAUNCH_DIRECTORY/buildConfig.sh
+                source $LAUNCHER_DIRECTORY/buildConfig.sh
             fi
             # add json configuration to launch file
-            launcher_data=$(jq '.' $LAUNCH_DIRECTORY/config.json)
+            launcher_data=$(jq '.' $LAUNCHER_DIRECTORY/config.json)
             jq ".configurations |= .+ [$launcher_data]" $LAUNCH_FILE > tmp.json && mv tmp.json $LAUNCH_FILE
             printf "$CHECK $launcher\n"
         done
@@ -181,12 +181,11 @@ setup() {
     rm -rf $DEVCONFIGS_FOLDER
     # pull repos locally
     echo "Cloning devconfigs..."
-    repositories=$(yq e -o=j -I=0 '.repositories | keys' $DEVCONFIGS_YML)
+    repositories=($(yq e '.repositories | to_entries | .[] | .key' $DEVCONFIGS_YML))
     for repository in "${repositories[@]}"; do
-        name=$(echo $repository | yq .[0])
-        url=$(yq .repositories.$name $DEVCONFIGS_YML)
-        git clone --quiet $url $DEVCONFIGS_FOLDER/$name
-        printf "$CHECK $name\n"
+        url=$(yq .repositories.$repository $DEVCONFIGS_YML)
+        git clone --quiet $url $DEVCONFIGS_FOLDER/$repository
+        printf "$CHECK $repository\n"
     done
 
     # check dependencies
