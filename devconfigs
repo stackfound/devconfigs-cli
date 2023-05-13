@@ -188,6 +188,9 @@ setup() {
         printf "$CHECK $repository\n"
     done
 
+    rm -rf $VSCODE_FOLDER
+    mkdir $VSCODE_FOLDER
+
     # check dependencies
     configureDependencies
     if [[ $? == 1 ]]
@@ -195,9 +198,6 @@ setup() {
         exit 0
     fi
     echo
-
-    rm -rf $VSCODE_FOLDER
-    mkdir $VSCODE_FOLDER
 
     configureTasks
     echo
